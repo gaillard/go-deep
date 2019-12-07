@@ -7,6 +7,8 @@ import (
 	deep "github.com/gaillard/go-deep"
 )
 
+type Stopper func(loss float64) bool
+
 // BatchTrainer implements parallelized batch training
 type BatchTrainer struct {
 	*internalb
@@ -15,6 +17,7 @@ type BatchTrainer struct {
 	parallelism int
 	solver      Solver
 	printer     *StatsPrinter
+	stop        Stopper
 }
 
 type internalb struct {
@@ -50,13 +53,19 @@ func newBatchTraining(layers []*deep.Layer, parallelism int) *internalb {
 }
 
 // NewBatchTrainer returns a BatchTrainer
-func NewBatchTrainer(solver Solver, verbosity, batchSize, parallelism int) *BatchTrainer {
+func NewBatchTrainer(solver Solver, verbosity, batchSize, parallelism int, stop Stopper) *BatchTrainer {
+	if stop == nil {
+		stop = func(float64) bool {
+			return false
+		}
+	}
 	return &BatchTrainer{
 		solver:      solver,
 		verbosity:   verbosity,
 		batchSize:   iparam(batchSize, 1),
 		parallelism: iparam(parallelism, 1),
 		printer:     NewStatsPrinter(),
+		stop:        stop,
 	}
 }
 
@@ -121,7 +130,10 @@ func (t *BatchTrainer) Train(n *deep.Neural, examples, validation Examples, iter
 		}
 
 		if t.verbosity > 0 && it%t.verbosity == 0 && len(validation) > 0 {
-			t.printer.PrintProgress(n, validation, time.Since(ts), it)
+			loss := t.printer.PrintProgress(n, validation, time.Since(ts), it)
+			if t.stop(loss) {
+				break
+			}
 		}
 	}
 }
